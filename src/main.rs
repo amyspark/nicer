@@ -5,21 +5,10 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use structopt::StructOpt;
 
-#[cfg(unix)]
-use nix::sys::signal::{kill, Signal};
-#[cfg(unix)]
-use nix::unistd::Pid;
-#[cfg(unix)]
-use nix::libc;
-#[cfg(unix)]
-use std::os::unix::process::ExitStatusExt;
-#[cfg(windows)]
-use winapi::um::processthreadsapi::{GetCurrentProcess, SetPriorityClass};
-#[cfg(windows)]
-use winapi::um::winbase::IDLE_PRIORITY_CLASS;
-
 #[cfg(all(unix, not(target_os = "macos")))]
 fn nice_process() {
+    use nix::libc;
+
     unsafe {
         libc::setpriority(libc::PRIO_PROCESS, 0, 19);
     }
@@ -27,6 +16,8 @@ fn nice_process() {
 
 #[cfg(all(unix, target_os = "macos"))]
 fn nice_process() {
+    use nix::libc;
+
     unsafe {
         libc::setpriority(libc::PRIO_PROCESS, 0, libc::PRIO_DARWIN_BG);
     }
@@ -34,6 +25,9 @@ fn nice_process() {
 
 #[cfg(windows)]
 fn nice_process() {
+    use winapi::um::winbase::IDLE_PRIORITY_CLASS;
+    use winapi::um::processthreadsapi::{GetCurrentProcess, SetPriorityClass};
+
     unsafe {
         let h_process = GetCurrentProcess();
         SetPriorityClass(h_process, IDLE_PRIORITY_CLASS);
@@ -61,6 +55,9 @@ fn main() -> Result<()> {
     let arc = Arc::new(Mutex::new(cmd));
 
     #[cfg(unix)] {
+        use nix::unistd::Pid;
+        use nix::sys::signal::{kill, Signal};
+
         let arc_handler = arc.clone();
         ctrlc::set_handler(move || {
             let pid = Pid::from_raw(arc_handler.lock().unwrap().id() as i32);
@@ -73,8 +70,10 @@ fn main() -> Result<()> {
     match status.code() {
         Some(i) => process::exit(i),
         None => {
-            #[cfg(unix)]
-            process::exit(status.signal().unwrap_or_else(|| 9) + 128);
+            #[cfg(unix)] {
+                use std::os::unix::process::ExitStatusExt;
+                process::exit(status.signal().unwrap_or_else(|| 9) + 128);
+            }
 
             #[cfg(windows)]
             process::exit(127);
