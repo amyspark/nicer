@@ -5,63 +5,80 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use structopt::StructOpt;
 
+#[cfg(all(unix, not(target_os = "macos")))]
 fn nice_process() -> Result<()>{
-    #[cfg(all(unix, not(target_os = "macos")))]
     unsafe {
         use nix::libc;
 
-        #[cfg(all(unix, not(target_os = "macos")))]
-        libc::setpriority(libc::PRIO_PROCESS, 0, 19);
+        let status = libc::setpriority(libc::PRIO_PROCESS, 0, 19);
 
-        let error = std::io::Error::last_os_error();
+        match status {
+            0 => Ok(()),
+            _ => {
+                let error = std::io::Error::last_os_error();
 
-        match error.raw_os_error() {
-            Some(0) => Ok(()),
-            _ => Err(anyhow::Error::new(error))
+                match error.raw_os_error() {
+                    Some(0) => Ok(()),
+                    _ => Err(anyhow::Error::new(error))
+                }
+            }
         }
     }
+}
 
-    #[cfg(all(unix, target_os = "macos"))]
+#[cfg(all(unix, target_os = "macos"))]
+fn nice_process() -> Result<()>{
     unsafe {
         use nix::libc;
 
         libc::setpriority(libc::PRIO_PROCESS, 0, libc::PRIO_DARWIN_BG);
-        
+
         libc::setpriority(libc::PRIO_DARWIN_PROCESS, 0, libc::PRIO_DARWIN_BG);
-        
-        
-        // Darwin returns ESRCH even though both values are correctly set; skip return
-        // print!("{}\n", libc::getpriority(libc::PRIO_DARWIN_PROCESS, 0));
-        // print!("{}\n", libc::getpriority(libc::PRIO_PROCESS, 0));
 
-        return Ok(());
+        match status {
+            0 => Ok(()),
+            _ => {
+                // Darwin returns ESRCH even though both values are correctly set; skip return
+                // print!("{}\n", libc::getpriority(libc::PRIO_DARWIN_PROCESS, 0));
+                // print!("{}\n", libc::getpriority(libc::PRIO_PROCESS, 0));
+                // let error = std::io::Error::last_os_error();
+
+                match error.raw_os_error() {
+                    Some(0) => Ok(()),
+                    _ => Err(anyhow::Error::new(error))
+                }
+                // return Ok(());
+            }
+        }
     }
+}
 
-    #[cfg(windows)]
+#[cfg(windows)]
+fn nice_process() -> Result<()>{
     unsafe {
+        use winapi::shared::minwindef::{TRUE, FALSE};
         use winapi::um::winbase::IDLE_PRIORITY_CLASS;
         use winapi::um::processthreadsapi::{GetCurrentProcess, SetPriorityClass};
 
         let h_process = GetCurrentProcess();
-        SetPriorityClass(h_process, IDLE_PRIORITY_CLASS);
+        let status = SetPriorityClass(h_process, IDLE_PRIORITY_CLASS);
 
-        let error = std::io::Error::last_os_error();
+        match status {
+            TRUE => Ok(()),
+            FALSE => {
+                let error = std::io::Error::last_os_error();
 
-        match error.raw_os_error() {
-            Some(0) => Ok(()),
-            _ => Err(anyhow::Error::new(error))
+                match error.raw_os_error() {
+                    Some(0) => Ok(()),
+                    _ => Err(anyhow::Error::new(error))
+                }
+            }
         }
     }
-    // return Ok(());
 }
 
+#[cfg(all(unix,  target_os= "macos"))]
 fn wakelock(process: &str, pid: u32) {
-    #[cfg(windows)]
-    unsafe {
-
-    }
-
-    #[cfg(all(unix,  target_os= "macos"))]
     unsafe {
         use core_foundation::string::{CFStringRef, CFStringCreateWithCString};
         use core_foundation::date::{CFTimeInterval};
@@ -100,9 +117,28 @@ fn wakelock(process: &str, pid: u32) {
     }
 }
 
+#[cfg(windows)]
+fn wakelock(_process: &str, _pid: u32) {
+    unsafe {
+        use winapi::um::winbase::{SetThreadExecutionState};
+        use winapi::um::winnt::{ES_CONTINUOUS};
+
+        SetThreadExecutionState(ES_SYSTEM_REQUIRED | ES_CONTINUOUS);
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn wakelock(_process: &str, _pid: u32) {
+    eprintln!("Linux has no caffeine, sadly.");
+}
+
 #[derive(StructOpt, Debug)]
 #[structopt(about = "Automagically call your tools with background priority")]
 struct Opt {
+    /// Keep the system awake (supported on Windows and macOS).
+    #[structopt(short, long)]
+    caffeinate: bool,
+
     /// Name or path to the program I'll background to.
     #[structopt(parse(from_os_str))]
     program: PathBuf,
@@ -120,7 +156,10 @@ fn main() -> Result<()> {
 
     let cmd = Command::new(opt.program).args(opt.args).spawn().context("Unable to spawn program")?;
 
-    wakelock(&program.to_string_lossy(), cmd.id());
+    if opt.caffeinate {
+        wakelock(&program.to_string_lossy(), cmd.id());
+    }
+
     let arc = Arc::new(Mutex::new(cmd));
 
     #[cfg(unix)] {
