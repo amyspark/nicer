@@ -1,7 +1,7 @@
 [package]
 name = "nicer"
 description = "Automagically call your tools with background priority"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["amyspark <amy@amyspark.me>"]
 edition = "2018"
 license = "MPL-2.0"
