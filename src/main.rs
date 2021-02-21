@@ -31,9 +31,7 @@ fn nice_process() -> Result<()>{
     unsafe {
         use nix::libc;
 
-        libc::setpriority(libc::PRIO_PROCESS, 0, libc::PRIO_DARWIN_BG);
-
-        libc::setpriority(libc::PRIO_DARWIN_PROCESS, 0, libc::PRIO_DARWIN_BG);
+        let status = libc::setpriority(libc::PRIO_DARWIN_PROCESS, 0, libc::PRIO_DARWIN_BG);
 
         match status {
             0 => Ok(()),
@@ -41,7 +39,7 @@ fn nice_process() -> Result<()>{
                 // Darwin returns ESRCH even though both values are correctly set; skip return
                 // print!("{}\n", libc::getpriority(libc::PRIO_DARWIN_PROCESS, 0));
                 // print!("{}\n", libc::getpriority(libc::PRIO_PROCESS, 0));
-                // let error = std::io::Error::last_os_error();
+                let error = std::io::Error::last_os_error();
 
                 match error.raw_os_error() {
                     Some(0) => Ok(()),
@@ -56,7 +54,7 @@ fn nice_process() -> Result<()>{
 #[cfg(windows)]
 fn nice_process() -> Result<()>{
     unsafe {
-        use winapi::shared::minwindef::{TRUE, FALSE};
+        use winapi::shared::minwindef::{TRUE};
         use winapi::um::winbase::IDLE_PRIORITY_CLASS;
         use winapi::um::processthreadsapi::{GetCurrentProcess, SetPriorityClass};
 
@@ -65,7 +63,7 @@ fn nice_process() -> Result<()>{
 
         match status {
             TRUE => Ok(()),
-            FALSE => {
+            _ => {
                 let error = std::io::Error::last_os_error();
 
                 match error.raw_os_error() {
@@ -121,7 +119,7 @@ fn wakelock(process: &str, pid: u32) {
 fn wakelock(_process: &str, _pid: u32) {
     unsafe {
         use winapi::um::winbase::{SetThreadExecutionState};
-        use winapi::um::winnt::{ES_CONTINUOUS};
+        use winapi::um::winnt::{ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
 
         SetThreadExecutionState(ES_SYSTEM_REQUIRED | ES_CONTINUOUS);
     }
