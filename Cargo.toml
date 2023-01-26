@@ -19,3 +19,8 @@ core-foundation = "0.9.1"
 anyhow = "1.0"
 ctrlc = "3.1"
 structopt = "0.3"
+
+[profile.release]
+codegen-units = 1
+opt-level = 'z'
+lto = true
