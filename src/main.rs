@@ -5,6 +5,9 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use structopt::StructOpt;
 
+#[cfg(target_os = "linux")]
+use zbus::{blocking::Connection, proxy};
+
 #[cfg(all(unix, not(target_os = "macos")))]
 fn nice_process() -> Result<()>{
     unsafe {
@@ -125,9 +128,62 @@ fn wakelock(_process: &str, _pid: u32) {
     }
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(target_os = "linux")]
+#[proxy(
+    default_service = "org.freedesktop.ScreenSaver",
+    interface = "org.freedesktop.ScreenSaver",
+    default_path = "/ScreenSaver"
+)]
+trait ScreenSaver {
+    fn inhibit(&self, application_name: &str, reason_for_inhibit: &str) -> zbus::Result<u32>;
+
+    #[dbus_proxy(no_reply_expected)]
+    fn uninhibit(&self, cookie: u32) -> zbus::Result<()>;
+}
+
+#[cfg(target_os = "linux")]
+pub struct DbusWakelock<'a> {
+    _connection: Connection,
+    proxy: ScreenSaverProxyBlocking<'a>,
+    handle: Option<u32>,
+}
+
+#[cfg(target_os = "linux")]
+impl<'a> DbusWakelock<'a> {
+    pub fn new() -> Result<DbusWakelock<'a>, anyhow::Error> {
+        let connection = Connection::session()?;
+        let proxy = ScreenSaverProxyBlocking::new(&connection)?;
+
+        Ok(DbusWakelock {
+            _connection: connection,
+            proxy,
+            handle: None,
+        })
+    }
+
+    pub fn inhibit(&mut self, process: &str, pid: u32) -> Result<(), anyhow::Error>{
+        let details = format!("Hi from Rust! We're keeping your computer awake on behalf of {:?} (pid {})", process, pid);
+        self.handle = Some(self.proxy.inhibit(process, &details)?);
+
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for DbusWakelock<'_> {
+    fn drop(&mut self) {
+        if let Some(cookie) = self.handle {
+            if let Err(error) = self.proxy.uninhibit(cookie) {
+                eprintln!("Failed dropping : {}", error);
+            }
+            self.handle = None;
+        }
+    }
+}
+
+#[cfg(all(unix, not(target_os = "linux"), not (target_os = "macos")))]
 fn wakelock(_process: &str, _pid: u32) {
-    eprintln!("Linux has no caffeine, sadly.");
+    eprintln!("No caffeine implemented for this platform.");
 }
 
 #[derive(StructOpt, Debug)]
@@ -154,8 +210,21 @@ fn main() -> Result<()> {
 
     let cmd = Command::new(opt.program).args(opt.args).spawn().context("Unable to spawn program")?;
 
+    #[cfg(not(target_os = "linux"))]
     if opt.caffeinate {
         wakelock(&program.to_string_lossy(), cmd.id());
+    }
+
+    #[cfg(target_os = "linux")]
+    let lock: Option<DbusWakelock> = if opt.caffeinate {
+        Some(DbusWakelock::new()?)
+    } else {
+        None
+    };
+
+    #[cfg(target_os = "linux")]
+    if let Some(mut v) = lock {
+        v.inhibit(&program.to_string_lossy(), cmd.id())?;
     }
 
     let arc = Arc::new(Mutex::new(cmd));
