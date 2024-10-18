@@ -135,10 +135,10 @@ fn wakelock(_process: &str, _pid: u32) {
     default_path = "/ScreenSaver"
 )]
 trait ScreenSaver {
-    fn inhibit(&self, application_name: &str, reason_for_inhibit: &str) -> zbus::Result<u32>;
+    fn Inhibit(&self, application_name: &str, reason_for_inhibit: &str) -> zbus::Result<u32>;
 
     #[dbus_proxy(no_reply_expected)]
-    fn uninhibit(&self, cookie: u32) -> zbus::Result<()>;
+    fn UnInhibit(&self, cookie: u32) -> zbus::Result<()>;
 }
 
 #[cfg(target_os = "linux")]
@@ -163,21 +163,16 @@ impl<'a> DbusWakelock<'a> {
 
     pub fn inhibit(&mut self, process: &str, pid: u32) -> Result<(), anyhow::Error>{
         let details = format!("Hi from Rust! We're keeping your computer awake on behalf of {:?} (pid {})", process, pid);
-        self.handle = Some(self.proxy.inhibit(process, &details)?);
-
+        self.handle = Some(self.proxy.Inhibit(process, &details)?);
         Ok(())
     }
-}
 
-#[cfg(target_os = "linux")]
-impl Drop for DbusWakelock<'_> {
-    fn drop(&mut self) {
+    pub fn uninhibit (&mut self) -> Result<(), anyhow::Error> {
         if let Some(cookie) = self.handle {
-            if let Err(error) = self.proxy.uninhibit(cookie) {
-                eprintln!("Failed dropping : {}", error);
-            }
+            self.proxy.UnInhibit(cookie).context("Failed dropping")?;
             self.handle = None;
         }
+        Ok(())
     }
 }
 
@@ -216,16 +211,13 @@ fn main() -> Result<()> {
     }
 
     #[cfg(target_os = "linux")]
-    let lock: Option<DbusWakelock> = if opt.caffeinate {
-        Some(DbusWakelock::new()?)
+    let mut dbus: Box<Option<DbusWakelock>> = if opt.caffeinate {
+        let mut lock = DbusWakelock::new()?;
+        lock.inhibit(&program.to_string_lossy(), cmd.id())?;
+        Box::new(Some(lock))
     } else {
-        None
+        Box::new(None)
     };
-
-    #[cfg(target_os = "linux")]
-    if let Some(mut v) = lock {
-        v.inhibit(&program.to_string_lossy(), cmd.id())?;
-    }
 
     let arc = Arc::new(Mutex::new(cmd));
 
@@ -237,6 +229,9 @@ fn main() -> Result<()> {
         ctrlc::set_handler(move || {
             let pid = Pid::from_raw(arc_handler.lock().unwrap().id() as i32);
             kill(pid, Signal::SIGINT).context("Unable to kill the program").unwrap();
+            if let Some(mut v) = dbus.take() {
+                v.uninhibit().unwrap();
+            }
         }).context("Unable to set the signal handler")?;
     }
 
