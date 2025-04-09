@@ -13,6 +13,27 @@ fn nice_process() -> Result<()>{
         let status = libc::setpriority(libc::PRIO_PROCESS, 0, 19);
 
         match status {
+            0 => {},
+            _ => {
+                let error = std::io::Error::last_os_error();
+
+                match error.raw_os_error() {
+                    Some(0) => {},
+                    _ => return Err(anyhow::Error::new(error))
+                }
+            }
+        };
+
+        const IOPRIO_WHO_PGRP: i32 = 2;
+        // #include <sys/syscall.h>
+        // #include <linux/ioprio.h>
+        // #include <unistd.h>
+        // std::cout << SYS_ioprio_set << " " << IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0) << std::endl;
+        const IOPRIO_CLASS_IDLE: i32 = 24576;
+
+        let status = libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PGRP, 0, IOPRIO_CLASS_IDLE);
+
+        match status {
             0 => Ok(()),
             _ => {
                 let error = std::io::Error::last_os_error();
