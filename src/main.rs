@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
+use clap::Parser;
 use std::path::PathBuf;
 use std::process;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use structopt::StructOpt;
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn nice_process() -> Result<()>{
@@ -52,26 +52,12 @@ fn nice_process() -> Result<()>{
 }
 
 #[cfg(windows)]
-fn nice_process() -> Result<()>{
+fn nice_process() -> anyhow::Result<()> {
     unsafe {
-        use winapi::shared::minwindef::{TRUE};
-        use winapi::um::winbase::IDLE_PRIORITY_CLASS;
-        use winapi::um::processthreadsapi::{GetCurrentProcess, SetPriorityClass};
+        use windows::Win32::System::Threading::{GetCurrentProcess, SetPriorityClass, IDLE_PRIORITY_CLASS};
 
         let h_process = GetCurrentProcess();
-        let status = SetPriorityClass(h_process, IDLE_PRIORITY_CLASS);
-
-        match status {
-            TRUE => Ok(()),
-            _ => {
-                let error = std::io::Error::last_os_error();
-
-                match error.raw_os_error() {
-                    Some(0) => Ok(()),
-                    _ => Err(anyhow::Error::new(error))
-                }
-            }
-        }
+        SetPriorityClass(h_process, IDLE_PRIORITY_CLASS).with_context(|| "Setting background process priority")
     }
 }
 
@@ -79,8 +65,8 @@ fn nice_process() -> Result<()>{
 fn wakelock(process: &str, pid: u32) {
     unsafe {
         use core_foundation::string::{CFStringRef, CFStringCreateWithCString};
-        use core_foundation::date::{CFTimeInterval};
-        use nix::libc::{c_int};
+        use core_foundation::date::CFTimeInterval;
+        use nix::libc::c_int;
         use std::ffi::CString;
 
         let prevent_system_sleep: CString = CString::new("PreventUserIdleSystemSleep").unwrap();
@@ -118,8 +104,7 @@ fn wakelock(process: &str, pid: u32) {
 #[cfg(windows)]
 fn wakelock(_process: &str, _pid: u32) {
     unsafe {
-        use winapi::um::winbase::{SetThreadExecutionState};
-        use winapi::um::winnt::{ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
+        use windows::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
 
         SetThreadExecutionState(ES_SYSTEM_REQUIRED | ES_CONTINUOUS);
     }
@@ -130,24 +115,22 @@ fn wakelock(_process: &str, _pid: u32) {
     eprintln!("Linux has no caffeine, sadly.");
 }
 
-#[derive(StructOpt, Debug)]
-#[structopt(about = "Automagically call your tools with background priority")]
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = "Automagically call your tools with background priority")]
 struct Opt {
     /// Keep the system awake (supported on Windows and macOS).
-    #[structopt(short, long)]
+    #[arg(short, long)]
     caffeinate: bool,
 
     /// Name or path to the program I'll background to.
-    #[structopt(parse(from_os_str))]
     program: PathBuf,
 
     /// Arguments to the program.
-    #[structopt(parse(from_os_str))]
     args: Vec<PathBuf>,
 }
 
 fn main() -> Result<()> {
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
     nice_process()?;
 
     let program = opt.program.clone();

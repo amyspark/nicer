@@ -1,13 +1,13 @@
 [package]
 name = "nicer"
 description = "Automagically call your tools with background priority"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["amyspark <amy@amyspark.me>"]
 edition = "2018"
 license = "MPL-2.0"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["winuser"] }
+windows = { version = "0.61.1", features = ["Win32_System_Power", "Win32_System_Threading"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.18"
@@ -16,11 +16,10 @@ nix = "0.18"
 core-foundation = "0.9.1"
 
 [dependencies]
-anyhow = "1.0"
-ctrlc = "3.1"
-structopt = "0.3"
+anyhow = "1.0.97"
+clap = { version = "4.5.35", features = ["derive"] }
+ctrlc = "3.4.6"
 
 [profile.release]
-codegen-units = 1
 opt-level = 'z'
 lto = true
