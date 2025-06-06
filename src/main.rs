@@ -108,7 +108,7 @@ fn wakelock(process: &str, pid: u32) {
         // let localized: CFStringRef = CFStringCreateWithCString(std::ptr::null(), localizedd.as_ptr(), kCFStringEncodingASCII);
 
         #[link(name = "IOKit", kind = "framework")]
-        extern {
+        extern "C" {
             #[allow(dead_code)]
             fn IOPMAssertionCreateWithName(AssertionType: CFStringRef, AssertionLevel: u32, AssertionName: CFStringRef, AssertionID: *mut u32) -> c_int;
 
